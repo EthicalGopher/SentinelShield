@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"log"
+	"sentinantal/vulnerabilities"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -28,10 +29,13 @@ func Server() {
 			bodyStr = string(c.Body())
 		}
 
-		err := c.Next()
-
 		latency := time.Since(start)
 
+		if vulnerabilities.SqlInjection(c, query) {
+			return c.Status(fiber.StatusForbidden).SendString("Blocked because of SqlInjection")
+		}
+
+		err := c.Next()
 		log.Printf(
 			"\n[%s] %s | %s | Latency: %s",
 			time.Now().Format("2006/01/02 15:04:05"),
@@ -50,7 +54,6 @@ func Server() {
 
 			log.Printf("   Body  : %s", bodyStr)
 		}
-
 		return err
 	})
 
