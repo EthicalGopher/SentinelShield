@@ -1,7 +1,15 @@
 package main
 
-import "github.com/EthicalGopher/SentinelShield/server"
+import (
+	"fmt"
+
+	"github.com/EthicalGopher/SentinelShield/tui"
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 func main() {
-	server.Server()
+	p := tea.NewProgram(tui.NewRoot(), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Println(err)
+	}
 }

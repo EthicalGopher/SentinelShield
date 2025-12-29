@@ -3,13 +3,15 @@ package server
 import (
 	"bytes"
 	"fmt"
-	"github.com/EthicalGopher/SentinelShield/vulnerabilities"
-	"github.com/gofiber/fiber/v2"
 	"io"
 	"log"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/EthicalGopher/SentinelShield/vulnerabilities"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 )
 
 func ForwardToBackend(c *fiber.Ctx, backendBaseURL string) error {
@@ -55,24 +57,23 @@ func Server() {
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 	})
-
+	app.Use(limiter.New(limiter.Config{
+		Max:        100,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP()
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			vulnerabilities.LogRateLimit(c)
+			return c.Status(429).SendString("Too many requests - blocked by SentinelShield")
+		},
+	}))
 	app.Use(func(c *fiber.Ctx) error {
 		start := time.Now()
 
 		ip := c.IP()
 		method := c.Method()
 		path := c.Path()
-
-		// -------- Query Params --------
-		query := c.Queries()
-		if len(query) > 0 {
-			if vulnerabilities.SqlInjection(c, query) {
-				return c.Status(fiber.StatusForbidden).
-					SendString("Blocked by SentinelShield (SQL Injection)")
-			}
-		}
-
-		// -------- Allow & Forward --------
 
 		latency := time.Since(start)
 
@@ -85,6 +86,19 @@ func Server() {
 			path,
 			latency,
 		)
+
+		// -------- Query Params --------
+		query := c.Queries()
+		if len(query) > 0 {
+			if vulnerabilities.SqlInjection(c, query) {
+				return c.Status(fiber.StatusForbidden).
+					SendString("Blocked by SentinelShield (SQL Injection)")
+			}
+			if vulnerabilities.XSSInjection(c, c.Queries()) {
+				return c.Status(fiber.StatusForbidden).SendString("Blocked due to XSS attempt")
+			}
+
+		}
 
 		if len(query) > 0 {
 			fmt.Print("\tQueries:")
@@ -102,6 +116,9 @@ func Server() {
 				if vulnerabilities.SqlInjectionBody(c, form.Value) {
 					return c.Status(fiber.StatusForbidden).
 						SendString("Blocked by SentinelShield (SQL Injection)")
+				}
+				if vulnerabilities.XSSInjectionBody(c, form.Value) {
+					return c.Status(fiber.StatusForbidden).SendString("Blocked due to XSS attempt")
 				}
 			}
 			if form.Value != nil {
